@@ -1,6 +1,8 @@
 package com.studentportal.complaints.controller;
 
 import com.studentportal.complaints.model.Complaint;
+import com.studentportal.complaints.model.ComplaintCategory;
+import com.studentportal.complaints.model.ComplaintPriority;
 import com.studentportal.complaints.model.ComplaintStatus;
 import com.studentportal.complaints.repository.ComplaintRepository;
 import com.studentportal.complaints.security.RateLimiter;
@@ -17,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -28,6 +31,8 @@ public class ComplaintController {
     private static final long LOGIN_WINDOW_MS = 15 * 60_000L;
     private static final int MAX_SUBMISSIONS = 5;
     private static final long SUBMISSION_WINDOW_MS = 60 * 60_000L;
+    private static final int MAX_LOOKUPS = 10;
+    private static final long LOOKUP_WINDOW_MS = 15 * 60_000L;
 
     private final ComplaintRepository repository;
     private final RateLimiter rateLimiter;
@@ -60,6 +65,19 @@ public class ComplaintController {
             .toList();
     }
 
+    /** Public: find one complaint from another device using its number plus the email it was filed with. */
+    @GetMapping("/lookup")
+    public Complaint lookupComplaint(@RequestParam Long id, @RequestParam String email, HttpServletRequest http) {
+        String key = "lookup:" + http.getRemoteAddr();
+        if (rateLimiter.isBlocked(key, MAX_LOOKUPS, LOOKUP_WINDOW_MS)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                "Too many lookups. Please wait a few minutes and try again.");
+        }
+        rateLimiter.record(key);
+        return repository.findByIdAndStudentEmailIgnoreCase(id, email.trim())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No complaint matches that number and email"));
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public Complaint createComplaint(@Valid @RequestBody CreateComplaintRequest request, HttpServletRequest http) {
@@ -74,6 +92,8 @@ public class ComplaintController {
         complaint.setSubject(request.subject().trim());
         complaint.setDescription(request.description().trim());
         complaint.setStatus(ComplaintStatus.YET_TO_BE_REVIEWED);
+        complaint.setCategory(request.category());
+        complaint.setPriority(request.priority() != null ? request.priority() : ComplaintPriority.MEDIUM);
         Complaint saved = repository.save(complaint);
         rateLimiter.record(key);
         return saved;
@@ -90,6 +110,34 @@ public class ComplaintController {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Complaint not found"));
         complaint.setStatus(request.status());
         return repository.save(complaint);
+    }
+
+    /** Admin only: write (or clear) the reply shown to the student. */
+    @PatchMapping("/{id}/response")
+    public Complaint updateResponse(@PathVariable Long id,
+                                    @Valid @RequestBody UpdateResponseRequest request,
+                                    @RequestHeader(value = "X-Admin-Password", required = false) String password,
+                                    HttpServletRequest http) {
+        requireAdmin(password, http.getRemoteAddr());
+        Complaint complaint = repository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Complaint not found"));
+        String text = request.response() == null ? "" : request.response().trim();
+        complaint.setAdminResponse(text.isEmpty() ? null : text);
+        complaint.setRespondedAt(text.isEmpty() ? null : LocalDateTime.now());
+        return repository.save(complaint);
+    }
+
+    /** Admin only. */
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteComplaint(@PathVariable Long id,
+                                @RequestHeader(value = "X-Admin-Password", required = false) String password,
+                                HttpServletRequest http) {
+        requireAdmin(password, http.getRemoteAddr());
+        if (!repository.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Complaint not found");
+        }
+        repository.deleteById(id);
     }
 
     private void requireAdmin(String password, String clientIp) {
@@ -114,8 +162,12 @@ public class ComplaintController {
         @NotBlank @Size(max = 100) String studentName,
         @NotBlank @Email @Size(max = 150) String studentEmail,
         @NotBlank @Size(max = 150) String subject,
-        @NotBlank @Size(min = 10, max = 3000) String description
+        @NotBlank @Size(min = 10, max = 3000) String description,
+        @NotNull ComplaintCategory category,
+        ComplaintPriority priority
     ) {}
 
     public record UpdateStatusRequest(@NotNull ComplaintStatus status) {}
+
+    public record UpdateResponseRequest(@Size(max = 2000) String response) {}
 }

@@ -26,10 +26,33 @@ public class Complaint {
     @Column(nullable = false, length = 30)
     private ComplaintStatus status = ComplaintStatus.YET_TO_BE_REVIEWED;
 
+    // Nullable so complaints created before these columns existed still load.
+    @Enumerated(EnumType.STRING)
+    @Column(length = 30)
+    private ComplaintCategory category;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 10)
+    private ComplaintPriority priority;
+
+    @Column(length = 2000)
+    private String adminResponse;
+
+    private LocalDateTime respondedAt;
+
     @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
     public Complaint() {}
+
+    public ComplaintCategory getCategory() { return category; }
+    public void setCategory(ComplaintCategory category) { this.category = category; }
+    public ComplaintPriority getPriority() { return priority; }
+    public void setPriority(ComplaintPriority priority) { this.priority = priority; }
+    public String getAdminResponse() { return adminResponse; }
+    public void setAdminResponse(String adminResponse) { this.adminResponse = adminResponse; }
+    public LocalDateTime getRespondedAt() { return respondedAt; }
+    public void setRespondedAt(LocalDateTime respondedAt) { this.respondedAt = respondedAt; }
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
