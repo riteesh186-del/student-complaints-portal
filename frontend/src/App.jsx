@@ -55,9 +55,11 @@ function App() {
     setLoading(true); setError('');
     try {
       const response = await fetch(API, { headers: adminHeaders(password) });
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401 || response.status === 403 || response.status === 429) {
         logoutAdmin();
-        setError(response.status === 401 ? 'Incorrect admin password.' : 'Admin access is not configured on the server.');
+        setError(response.status === 401 ? 'Incorrect admin password.'
+          : response.status === 429 ? 'Too many failed attempts. Please wait 15 minutes and try again.'
+          : 'Admin access is not configured on the server.');
         return false;
       }
       if (!response.ok) throw new Error('Could not load complaints.');
@@ -104,7 +106,7 @@ function App() {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.message || 'Please check your details and try again.');
+        throw new Error(response.status === 429 && data.message ? data.message : 'Please check your details and try again.');
       }
       const created = await response.json();
       writeStore(localStorage, MINE_KEY, JSON.stringify([...readMineIds(), created.id]));
@@ -154,7 +156,7 @@ function App() {
                 <Field label="Full name" required><input value={form.studentName} onChange={e=>setForm({...form,studentName:e.target.value})} placeholder="Enter your full name" maxLength="100" required /></Field>
                 <Field label="College email" required><input type="email" value={form.studentEmail} onChange={e=>setForm({...form,studentEmail:e.target.value})} placeholder="you@college.edu" maxLength="150" required /></Field>
                 <div className="full-width"><Field label="Complaint subject" required><input value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})} placeholder="e.g. Lab equipment not working" maxLength="150" required /></Field></div>
-                <div className="full-width"><Field label="Describe the issue" required><textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Explain what happened, where it happened, and any helpful details..." maxLength="3000" rows="5" required/><span className="char-count">{form.description.length}/3000</span></Field></div>
+                <div className="full-width"><Field label="Describe the issue" required><textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Explain what happened, where it happened, and any helpful details..." minLength="10" maxLength="3000" rows="5" required/><span className="char-count">{form.description.length}/3000</span></Field></div>
               </div>
               <div className="form-footer"><span>Your complaint starts as <b>Yet to be reviewed</b>.</span><button className="primary-btn" disabled={submitting}>{submitting ? 'Submitting...' : <><Plus size={17}/> Submit complaint</>}</button></div>
             </form>
